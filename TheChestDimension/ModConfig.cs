@@ -12,7 +12,7 @@ namespace TheChestDimension
         public SButton TCDKey { get; set; } = SButton.H;
 
         public bool ShowEntryMessage { get; set; } = false;
-        public string EntryMessage { get; set; } = "Welcome to the Chest Dimension. Press {TCDkey} or go to the top-left corner to exit.";
+        public string EntryMessage { get; set; } = "Welcome to the Chest Dimension. Press {TCDkey} to exit.";
 
         public string CanOnlyEnterFrom { get; set; } //if not empty, implies CanEnterFromMines = false
         public bool CanEnterFromCave { get; set; } = true;
