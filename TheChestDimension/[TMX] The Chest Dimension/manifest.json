@@ -2,7 +2,7 @@
   "Name": "The Chest Dimension (TMX)",
   "Author": "zazizu",
   "Version": "0.0.1",
-  "Description": "(TMX) A large empty room for remote storage and automation.",
+  "Description": "A large, empty room for your chests and machines.",
   "UniqueID": "zazizu.TheChestDimensionTMX",
   "MinimumApiVersion": "2.0",
   "ContentPackFor": {
