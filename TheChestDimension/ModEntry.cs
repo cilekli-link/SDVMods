@@ -4,26 +4,26 @@ using StardewModdingAPI.Events;
 using StardewValley;
 using System;
 using System.Collections.Generic;
-using System.Linq;
 
 namespace TheChestDimension
 {
     public class ModEntry : Mod
     {
-        // list of custom spawn locations of all players in current save
-        List<playerEntry> customLocations;
+        // list of entries for all players in current save
+        // player entries currently only contain custom spawn locations
+        List<playerEntry> entries;
 
-        string currentPlayerID;
+        // entry of the current player
+        playerEntry currentEntry = new playerEntry();
+
         private ModConfig config;
+
         // custom spawn position
-        private spawnPos customPos;
         // player's location and position before the warp
         GameLocation OldLocation;
         Vector2 OldPosition;
-        // true after requesting playerEntry from master, false after receiving spawnPos
+        // true after requesting playerEntry from master, false after receiving playerEntry
         private bool waitingToWarp = false;
-        // true after receiving playerEntry, to prevent asking for spawnPos multiple times
-        private bool locReceived = false;
         public override void Entry(IModHelper helper)
         {
             helper.Events.GameLoop.SaveLoaded += GameLoop_SaveLoaded;
@@ -31,25 +31,26 @@ namespace TheChestDimension
             helper.Events.Input.ButtonPressed += Input_ButtonPressed;
             helper.Events.Multiplayer.ModMessageReceived += Multiplayer_ModMessageReceived;
             config = Helper.ReadConfig<ModConfig>();
-            currentPlayerID = helper.Data.ReadGlobalData<string>("TCDplayerID");
-            if (currentPlayerID == null)
+            currentEntry.ID = helper.Data.ReadGlobalData<string>("TCDplayerID");
+            if (currentEntry.ID == null)
             {
-                currentPlayerID = Guid.NewGuid().ToString();
-                helper.Data.WriteGlobalData("TCDplayerID", currentPlayerID);
+                currentEntry.ID = Guid.NewGuid().ToString();
+                helper.Data.WriteGlobalData("TCDplayerID", currentEntry.ID);
             }
         }
 
         private void GameLoop_DayEnding(object sender, DayEndingEventArgs e)
         {
-            if (Game1.IsMasterGame) Helper.Data.WriteSaveData("TCDcustomSpawnLocations", customLocations);
+            if (Game1.IsMasterGame) Helper.Data.WriteSaveData("TCDplayerEntries", entries);
         }
 
         private void GameLoop_SaveLoaded(object sender, SaveLoadedEventArgs e)
         {
             if (Game1.IsMasterGame)
             {
-                customLocations = Helper.Data.ReadSaveData<List<playerEntry>>("TCDcustomSpawnLocations");
-                if (customLocations == null) customLocations = new List<playerEntry>();
+                entries = Helper.Data.ReadSaveData<List<playerEntry>>("TCDplayerEntries");
+                if (entries == null) entries = new List<playerEntry>();
+                currentEntry = getEntryWithID(currentEntry.ID);
             }
         }
 
@@ -57,67 +58,33 @@ namespace TheChestDimension
         {
             if (e.FromModID == ModManifest.UniqueID)
             {
-                playerEntry entry = e.ReadAs<playerEntry>();
+                playerEntry receivedEntry = e.ReadAs<playerEntry>();
                 if (Game1.IsMasterGame)
                 {
-                    // master: received position request from slave
-                    if (e.Type == "TCDposRequest")
+                    // master: received entry request from slave
+                    if (e.Type == "TCDentryRequest")
                     {
-                        playerEntry pe = null;
-                        foreach (playerEntry player in customLocations)
-                        {
-                            if (player.ID == entry.ID) pe = player;
-                        }
-                        if (pe != null)
-                        {
-                            Helper.Multiplayer.SendMessage(pe, "TCDpos", new[] { ModManifest.UniqueID });
-                        }
-                        else
-                        {
-                            Helper.Multiplayer.SendMessage(new playerEntry(entry.ID), "TCDpos", new[] { ModManifest.UniqueID });
-                        }
+                        Helper.Multiplayer.SendMessage(getEntryWithID(receivedEntry.ID), "TCDentry", new[] { ModManifest.UniqueID });
                     }
 
-                    // master: received position set request from slave
-                    if (e.Type == "TCDposSet")
+                    // master: received entry set request from slave
+                    if (e.Type == "TCDentrySet")
                     {
-                        bool foundPlayer = false;
-                        foreach (playerEntry player in customLocations)
-                        {
-                            if (player.ID == entry.ID)
-                            {
-                                foundPlayer = true;
-                                player.pos = entry.pos;
-                            }
-                        }
-                        if (!foundPlayer) { customLocations.Add(entry); }
-                        Helper.Multiplayer.SendMessage(entry, "TCDconfirmPosSet", new[] { ModManifest.UniqueID });
+                        addOrUpdateEntry(receivedEntry);
                     }
                 }
                 else
                 {
-                    // slave: received position from master
-                    if (e.Type == "TCDpos" && entry.ID == currentPlayerID)
+                    // slave: received entry from master
+                    if (e.Type == "TCDentry" && receivedEntry.ID == currentEntry.ID)
                     {
-                        if (entry.empty)
+                        currentEntry = receivedEntry;
+                        if (currentEntry.emptyPos)
                         {
-                            customPos = null;
-                        }
-                        else
-                        {
-                            customPos = entry.pos;
+                            currentEntry.customPos = null;
                         }
                         waitingToWarp = false;
-                        locReceived = true;
                         Warp();
-                    }
-
-                    // slave: received position set confirmation from master
-                    if (e.Type.StartsWith("TCDconfirmPosSet") && entry.ID == currentPlayerID)
-                    {
-                        string x = entry.pos.X;
-                        string y = entry.pos.Y;
-                        Game1.chatBox.addInfoMessage("TCD spawn position of " + Game1.player.Name + " set to " + x + "," + y + ".");
                     }
                 }
             }
@@ -144,16 +111,12 @@ namespace TheChestDimension
             {
                 string xPos = Game1.player.getTileX().ToString();
                 string yPos = Game1.player.getTileY().ToString();
-                customPos = new spawnPos(xPos, yPos);
-                if (Game1.IsMasterGame)
+                currentEntry.emptyPos = false;
+                currentEntry.customPos = new spawnPos(xPos, yPos);
+                Game1.chatBox.addInfoMessage("TCD spawn position set to " + xPos + "," + yPos + ".");
+                if (!Game1.IsMasterGame)
                 {
-                    Helper.Data.WriteSaveData("TCDspawnPos_" + currentPlayerID, customPos);
-                    Game1.chatBox.addInfoMessage("TCD spawn position set to " + xPos + "," + yPos + ".");
-                }
-                else
-                {
-                    Helper.Multiplayer.SendMessage(new playerEntry(currentPlayerID,customPos), "TCDposSet", new[] { ModManifest.UniqueID });
-                    //Game1.chatBox.addInfoMessage("Sent current TCD position to the host, waiting for confirmation.");
+                    Helper.Multiplayer.SendMessage(currentEntry, "TCDentrySet", new[] { ModManifest.UniqueID });
                 }
             }
             else
@@ -164,20 +127,7 @@ namespace TheChestDimension
 
         private bool PlayerInTCD => Game1.player.currentLocation.Name == "ChestDimension";
 
-        bool getSpawnPos()
-        {
-            if (Game1.IsMasterGame)
-            {
-                customPos = Helper.Data.ReadSaveData<spawnPos>("TCDspawnPos_" + currentPlayerID);
-                return true;
-            }
-            else
-            {
-                waitingToWarp = true;
-                Helper.Multiplayer.SendMessage(new playerEntry(currentPlayerID), "TCDposRequest", new[] { ModManifest.UniqueID });
-                return false;
-            }
-        }
+
 
         void Warp()
         {
@@ -204,23 +154,20 @@ namespace TheChestDimension
                     OldLocation = Game1.player.currentLocation;
                     OldPosition = Game1.player.getTileLocation();
 
-
-                    if (!locReceived)
+                    if (!Game1.IsMasterGame)
                     {
-                        if (!getSpawnPos())
-                        {
-                            return;
-                        }
+                        waitingToWarp = true;
+                        requestEntry();
+                        return;
                     }
-
                     // if custom spawn location is null, warp to default spawn location, else warp to custom spawn location 
-                    if (customPos == null)
+                    if (currentEntry.emptyPos)
                     {
                         Game1.warpFarmer("ChestDimension", 55, 37, false);
                     }
                     else
                     {
-                        Game1.warpFarmer("ChestDimension", int.Parse(customPos.X), int.Parse(customPos.Y), false);
+                        Game1.warpFarmer("ChestDimension", int.Parse(currentEntry.customPos.X), int.Parse(currentEntry.customPos.Y), false);
                     }
 
                     // if entry message is enabled, replace variables and show entry message in chat
@@ -241,6 +188,33 @@ namespace TheChestDimension
                     Game1.chatBox.addInfoMessage(config.CannotEnterMessage);
                 }
             }
+        }
+
+        private void requestEntry()
+        {
+            Helper.Multiplayer.SendMessage(new playerEntry(currentEntry.ID), "TCDentryRequest", new[] { ModManifest.UniqueID });
+        }
+
+        void addOrUpdateEntry(playerEntry entry)
+        {
+            foreach (playerEntry e in entries)
+            {
+                if (e.ID == entry.ID)
+                {
+                    e.update(entry);
+                    return;
+                }
+            }
+            entries.Add(entry);
+        }
+
+        playerEntry getEntryWithID(string ID)
+        {
+            foreach (playerEntry e in entries)
+            {
+                if (e.ID == ID) return e;
+            }
+            return new playerEntry(ID);
         }
     }
 
@@ -264,21 +238,28 @@ namespace TheChestDimension
     class playerEntry
     {
         public string ID;
-        public spawnPos pos;
-        public bool empty = false;
+        public spawnPos customPos;
+        public bool emptyPos = false;
         public playerEntry()
         {
-
+            emptyPos = true;
         }
-        public playerEntry(string id, spawnPos pos)
+        public playerEntry(string id, spawnPos customPos)
         {
             ID = id;
-            this.pos = pos;
+            this.customPos = customPos;
         }
         public playerEntry(string id)
         {
             ID = id;
-            empty = true;
+            emptyPos = true;
+        }
+        public void update(playerEntry updateFrom)
+        {
+            customPos = updateFrom.customPos;
+            emptyPos = updateFrom.emptyPos;
         }
     }
+
+
 }
