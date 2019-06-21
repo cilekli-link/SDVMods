@@ -18,7 +18,6 @@ namespace TheChestDimension
 
         private ModConfig config;
 
-        // custom spawn position
         // player's location and position before the warp
         GameLocation OldLocation;
         Vector2 OldPosition;
@@ -31,12 +30,6 @@ namespace TheChestDimension
             helper.Events.Input.ButtonPressed += Input_ButtonPressed;
             helper.Events.Multiplayer.ModMessageReceived += Multiplayer_ModMessageReceived;
             config = Helper.ReadConfig<ModConfig>();
-            currentEntry.ID = helper.Data.ReadGlobalData<string>("TCDplayerID");
-            if (currentEntry.ID == null)
-            {
-                currentEntry.ID = Guid.NewGuid().ToString();
-                helper.Data.WriteGlobalData("TCDplayerID", currentEntry.ID);
-            }
         }
 
         private void GameLoop_DayEnding(object sender, DayEndingEventArgs e)
@@ -50,7 +43,7 @@ namespace TheChestDimension
             {
                 entries = Helper.Data.ReadSaveData<List<playerEntry>>("TCDplayerEntries");
                 if (entries == null) entries = new List<playerEntry>();
-                currentEntry = getEntryWithID(currentEntry.ID);
+                currentEntry = getEntryWithName(Game1.player.Name);
             }
         }
 
@@ -64,7 +57,7 @@ namespace TheChestDimension
                     // master: received entry request from slave
                     if (e.Type == "TCDentryRequest")
                     {
-                        Helper.Multiplayer.SendMessage(getEntryWithID(receivedEntry.ID), "TCDentry", new[] { ModManifest.UniqueID });
+                        Helper.Multiplayer.SendMessage(getEntryWithName(receivedEntry.Name), "TCDentry", new[] { ModManifest.UniqueID });
                     }
 
                     // master: received entry set request from slave
@@ -76,7 +69,7 @@ namespace TheChestDimension
                 else
                 {
                     // slave: received entry from master
-                    if (e.Type == "TCDentry" && receivedEntry.ID == currentEntry.ID)
+                    if (e.Type == "TCDentry" && receivedEntry.Name == Game1.player.Name)
                     {
                         currentEntry = receivedEntry;
                         if (currentEntry.emptyPos)
@@ -192,14 +185,14 @@ namespace TheChestDimension
 
         private void requestEntry()
         {
-            Helper.Multiplayer.SendMessage(new playerEntry(currentEntry.ID), "TCDentryRequest", new[] { ModManifest.UniqueID });
+            Helper.Multiplayer.SendMessage(new playerEntry(Game1.player.Name), "TCDentryRequest", new[] { ModManifest.UniqueID });
         }
 
         void addOrUpdateEntry(playerEntry entry)
         {
             foreach (playerEntry e in entries)
             {
-                if (e.ID == entry.ID)
+                if (e.Name == entry.Name)
                 {
                     e.update(entry);
                     return;
@@ -208,11 +201,11 @@ namespace TheChestDimension
             entries.Add(entry);
         }
 
-        playerEntry getEntryWithID(string ID)
+        playerEntry getEntryWithName(string ID)
         {
             foreach (playerEntry e in entries)
             {
-                if (e.ID == ID) return e;
+                if (e.Name == ID) return e;
             }
             return new playerEntry(ID);
         }
@@ -237,7 +230,7 @@ namespace TheChestDimension
 
     class playerEntry
     {
-        public string ID;
+        public string Name;
         public spawnPos customPos;
         public bool emptyPos = false;
         public playerEntry()
@@ -246,12 +239,12 @@ namespace TheChestDimension
         }
         public playerEntry(string id, spawnPos customPos)
         {
-            ID = id;
+            Name = id;
             this.customPos = customPos;
         }
         public playerEntry(string id)
         {
-            ID = id;
+            Name = id;
             emptyPos = true;
         }
         public void update(playerEntry updateFrom)
