@@ -2,6 +2,7 @@
 using StardewModdingAPI;
 using StardewModdingAPI.Events;
 using StardewValley;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -12,6 +13,7 @@ namespace TheChestDimension
         // list of custom spawn locations of all players in current save
         List<playerEntry> customLocations;
 
+        string currentPlayerID;
         private ModConfig config;
         // custom spawn position
         private spawnPos customPos;
@@ -29,6 +31,12 @@ namespace TheChestDimension
             helper.Events.Input.ButtonPressed += Input_ButtonPressed;
             helper.Events.Multiplayer.ModMessageReceived += Multiplayer_ModMessageReceived;
             config = Helper.ReadConfig<ModConfig>();
+            currentPlayerID = helper.Data.ReadGlobalData<string>("TCDplayerID");
+            if (currentPlayerID == null)
+            {
+                currentPlayerID = Guid.NewGuid().ToString();
+                helper.Data.WriteGlobalData("TCDplayerID", currentPlayerID);
+            }
         }
 
         private void GameLoop_DayEnding(object sender, DayEndingEventArgs e)
@@ -49,16 +57,16 @@ namespace TheChestDimension
         {
             if (e.FromModID == ModManifest.UniqueID)
             {
+                playerEntry entry = e.ReadAs<playerEntry>();
                 if (Game1.IsMasterGame)
                 {
-                    // master: received spawnPos request from slave
+                    // master: received position request from slave
                     if (e.Type == "TCDposRequest")
                     {
-                        long playerID = e.FromPlayerID;
                         playerEntry pe = null;
                         foreach (playerEntry player in customLocations)
                         {
-                            if (player.ID == playerID) pe = player;
+                            if (player.ID == entry.ID) pe = player;
                         }
                         if (pe != null)
                         {
@@ -66,53 +74,49 @@ namespace TheChestDimension
                         }
                         else
                         {
-                            Helper.Multiplayer.SendMessage(new playerEntry(playerID), "TCDpos", new[] { ModManifest.UniqueID });
+                            Helper.Multiplayer.SendMessage(new playerEntry(entry.ID), "TCDpos", new[] { ModManifest.UniqueID });
                         }
                     }
 
-                    // master: received spawnPos set request from slave
+                    // master: received position set request from slave
                     if (e.Type == "TCDposSet")
                     {
-                        long playerID = e.FromPlayerID;
-                        spawnPos newPos = e.ReadAs<spawnPos>();
-                        playerEntry newEntry = new playerEntry(playerID, newPos);
                         bool foundPlayer = false;
                         foreach (playerEntry player in customLocations)
                         {
-                            if (player.ID == playerID)
+                            if (player.ID == entry.ID)
                             {
                                 foundPlayer = true;
-                                player.pos = newPos;
+                                player.pos = entry.pos;
                             }
                         }
-                        if (!foundPlayer) { customLocations.Add(newEntry); }
-                        Helper.Multiplayer.SendMessage(newEntry, "TCDconfirmPosSet", new[] { ModManifest.UniqueID });
+                        if (!foundPlayer) { customLocations.Add(entry); }
+                        Helper.Multiplayer.SendMessage(entry, "TCDconfirmPosSet", new[] { ModManifest.UniqueID });
                     }
                 }
                 else
                 {
-                    // slave: received spawnPos from master
-                    if (e.Type == "TCDpos" && e.ReadAs<playerEntry>().ID == Game1.player.UniqueMultiplayerID)
+                    // slave: received position from master
+                    if (e.Type == "TCDpos" && entry.ID == currentPlayerID)
                     {
-                        if (e.ReadAs<playerEntry>().empty)
+                        if (entry.empty)
                         {
                             customPos = null;
                         }
                         else
                         {
-                            customPos = e.ReadAs<playerEntry>().pos;
+                            customPos = entry.pos;
                         }
                         waitingToWarp = false;
                         locReceived = true;
                         Warp();
                     }
 
-                    // slave: received spawnPos set confirmation from master
-                    if (e.Type.StartsWith("TCDconfirmPosSet") && e.ReadAs<playerEntry>().ID == Game1.player.UniqueMultiplayerID)
+                    // slave: received position set confirmation from master
+                    if (e.Type.StartsWith("TCDconfirmPosSet") && entry.ID == currentPlayerID)
                     {
-                        playerEntry pe = e.ReadAs<playerEntry>();
-                        string x = pe.pos.X;
-                        string y = pe.pos.Y;
+                        string x = entry.pos.X;
+                        string y = entry.pos.Y;
                         Game1.chatBox.addInfoMessage("TCD spawn position of " + Game1.player.Name + " set to " + x + "," + y + ".");
                     }
                 }
@@ -143,12 +147,12 @@ namespace TheChestDimension
                 customPos = new spawnPos(xPos, yPos);
                 if (Game1.IsMasterGame)
                 {
-                    Helper.Data.WriteSaveData("TCDspawnPos_" + Game1.player.UniqueMultiplayerID.ToString(), customPos);
+                    Helper.Data.WriteSaveData("TCDspawnPos_" + currentPlayerID, customPos);
                     Game1.chatBox.addInfoMessage("TCD spawn position set to " + xPos + "," + yPos + ".");
                 }
                 else
                 {
-                    Helper.Multiplayer.SendMessage(customPos, "TCDposSet", new[] { ModManifest.UniqueID });
+                    Helper.Multiplayer.SendMessage(new playerEntry(currentPlayerID,customPos), "TCDposSet", new[] { ModManifest.UniqueID });
                     //Game1.chatBox.addInfoMessage("Sent current TCD position to the host, waiting for confirmation.");
                 }
             }
@@ -164,13 +168,13 @@ namespace TheChestDimension
         {
             if (Game1.IsMasterGame)
             {
-                customPos = Helper.Data.ReadSaveData<spawnPos>("TCDspawnPos_" + Game1.player.UniqueMultiplayerID.ToString());
+                customPos = Helper.Data.ReadSaveData<spawnPos>("TCDspawnPos_" + currentPlayerID);
                 return true;
             }
             else
             {
                 waitingToWarp = true;
-                Helper.Multiplayer.SendMessage(new object(), "TCDposRequest", new[] { ModManifest.UniqueID });
+                Helper.Multiplayer.SendMessage(new playerEntry(currentPlayerID), "TCDposRequest", new[] { ModManifest.UniqueID });
                 return false;
             }
         }
@@ -259,19 +263,19 @@ namespace TheChestDimension
 
     class playerEntry
     {
-        public long ID;
+        public string ID;
         public spawnPos pos;
         public bool empty = false;
         public playerEntry()
         {
 
         }
-        public playerEntry(long id, spawnPos pos)
+        public playerEntry(string id, spawnPos pos)
         {
             ID = id;
             this.pos = pos;
         }
-        public playerEntry(long id)
+        public playerEntry(string id)
         {
             ID = id;
             empty = true;
