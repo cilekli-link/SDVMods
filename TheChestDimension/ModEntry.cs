@@ -70,7 +70,7 @@ namespace TheChestDimension
                     {
                         Helper.Multiplayer.SendMessage(getEntryWithName(receivedEntry.Name), "TCDentry", new[] { ModManifest.UniqueID });
                     }
-                    // master: received entry request from slave
+                    // master: received rules request from slave
                     if (e.Type == "TCDruleRequest")
                     {
                         Helper.Multiplayer.SendMessage(rules, "TCDrules", new[] { ModManifest.UniqueID });
@@ -94,6 +94,7 @@ namespace TheChestDimension
                         }
                         if (waitingToWarp) waitingToWarp = false; Warp();
                     }
+                    // slave: received rules from master
                     if (e.Type == "TCDrules")
                     {
                         rules = e.ReadAs<TCDRules>();
